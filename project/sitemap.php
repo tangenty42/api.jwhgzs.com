@@ -1,5 +1,5 @@
 <?php header('Content-type: application/xml') ?>
-<?= '<?xml version="1.0" encoding="UTF-8"?>' ?>
+<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <?php
         /* sitemap 生成 */
@@ -11,16 +11,13 @@
         function pass($url = '') {
             return root_of($url) == root_of($_GET['site']);
         }
-        function go($loc = '', $lastmod = 0, $changefreq = 'daily', $priority = '0.8') {
+        function go1($loc = '', $lastmod = 0, $changefreq = 'daily', $priority = '0.8') {
             $lastmod = $lastmod === 0 ? date('Y-m-d') : $lastmod;
-            echo(<<<XML
-<url><loc>$loc</loc><lastmod>$lastmod</lastmod><changefreq>$changefreq</changefreq><priority>$priority</priority></url>
-XML
-            );
+            echo('<url><loc>' . $loc . '</loc><lastmod>' . $lastmod . '</lastmod><changefreq>' . $changefreq . '</changefreq><priority>' . $priority . '</priority></url>');
         }
         
         foreach (c::$SEO_INF['urls'] as $v)
             if (pass(u($v)))
-                go(u($v));
+                go1(u($v));
     ?>
 </urlset>
