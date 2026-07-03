@@ -14,13 +14,14 @@
         $data[$k]['udata'] = app_getUserData_mini($v['uid']);
     }
     // 除了主帖子（id最先的），其他帖子倒序
-    $tmp = [];
-    foreach ($data as $k => $v) {
-        if ($k == 0) continue;
-        $tmp[] = $v;
-    }
-    rsort($tmp);
-    $data = array_merge([$data[0]], $tmp);
+    // 2026/7/3：祖宗之法，大可变！！
+    // $tmp = [];
+    // foreach ($data as $k => $v) {
+    //     if ($k == 0) continue;
+    //     $tmp[] = $v;
+    // }
+    // rsort($tmp);
+    // $data = array_merge([$data[0]], $tmp);
     
     $forumData['adminUids'] = app_getAdminTable(false, 100);
     
