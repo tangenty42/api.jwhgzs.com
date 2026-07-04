@@ -38,7 +38,7 @@
         ];
         public static $USERTOKEN_EXPTIME = 60 * 60 * 48 * 1000;
         public static $USERONLINE_INTERVALTIME = 5 * 1000;
-        public static $JSTHREAD_INTERVAL = 2000;
+        public static $JSTHREAD_INTERVAL = 15000;
         public static $USERLOGINDETAILS_LIMIT = 20;
         public static $URLS_TABLE = [
             'local' => [
