@@ -23,5 +23,9 @@
             'signName' => '',
             'templateCode' => ''
         ];
+        public static $OSS_CONFIG = [
+            'accessKeyId' => '',
+            'accessKeySecret' => ''
+        ];
     }
 ?>

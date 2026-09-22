@@ -8,6 +8,8 @@
     foreach ($replyList as $k => $v) {
         $data[$k] = $v;
         $data[$k]['_id'] = $k;
+        $data[$k]['content'] = app_staticcs_resolve($v['content']);
+        $data[$k]['coverImg'] = app_staticcs_resolve($v['coverImg']);
         $data[$k]['looks'] = app_getLooks('forum', $v['id']);
         $data[$k]['likes'] = app_getLikes('forum', $v['id']);
         $data[$k]['liked'] = app_isLiked('forum', $v['id'], $uid);

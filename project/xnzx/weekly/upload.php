@@ -148,7 +148,16 @@
         $json['tiji'] = formatRow($json['tiji']);
         $json['houji'] = formatRow($json['houji']);
         
-        if ($file['tmp_name']) {
+        if ($json['ossKey']) {
+            // OSS 直传模式：对象已上传，校验 key 与大小
+            if (! preg_match('#^user/xnzx_weekly/pid\d+_[^/]+_\d+\.(jpg|jpeg|png|gif|webp)$#u', '' . $json['ossKey'])) {
+                api_callback(0, '操作失败了呢~');
+            }
+            if (! staticcs_verify_uploaded($json['ossKey'])) {
+                api_callback(0, '上传图片失败~');
+            }
+        }
+        elseif ($file['tmp_name']) {
             $oriUrl = $file['tmp_name'];
             $imgUrl = $file['tmp_name'] . '_formatted';
             if (! image_toJpeg($oriUrl, $imgUrl)) {

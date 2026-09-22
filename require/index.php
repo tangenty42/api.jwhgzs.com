@@ -530,7 +530,7 @@
                 if (! $result1) {
                     api_callback(0, '上传图片失败！~');
                 }
-                $realUrl = u('static://') . $imgToUrl;
+                $realUrl = 'static://' . ltrim($imgToUrl, '/');
                 $content = str_ireplace($ori_v, $realUrl, $content);
                 if (! $firstImg) $firstImg = $realUrl;
             }
@@ -538,7 +538,16 @@
                 if (! $firstImg) $firstImg = $v;
             }
         }
+        // 历史完整URL归一为 static:// 协议，并压缩域名后的多余斜杠
+        $pattern = '#https?://' . preg_quote(explode('/', u('static://'))[2], '#') . '/+#iu';
+        $content = preg_replace($pattern, 'static://', $content);
+        $firstImg = preg_replace($pattern, 'static://', $firstImg);
         return [$content, $firstImg];
+    }
+    
+    /* 输出时将 static:// 协议解析为当前静态资源URL（u('static://') 自带尾斜杠） */
+    function app_staticcs_resolve($str = '') {
+        return str_ireplace('static://', u('static://'), '' . $str);
     }
     
     function app_xnzx_sid2name($year = 0, $class = 0, $sid = 0) {
@@ -801,36 +810,168 @@
         return (! empty($result['Success']) && $code == 'OK' && $verifyResult == 'PASS');
     }
     
-    function staticcs_dir($name) {
-        $dir = c::$STATICCS_CONFIG['root'] . '/' . $name;
-        if (! file_exists($dir))
-            return mkdir($dir);
+    /* S3 兼容对象存储（AWS SigV4 签名，虚拟主机风格 bucket.endpoint） */
+    function staticcs_key($path = '') {
+        return c::$STATICCS_CONFIG['prefix'] . ltrim($path, '/');
+    }
+    function staticcs_request($method = 'GET', $key = '', $filePath = null, $headersExtra = [], $query = [], $head = false) {
+        $conf = c::$STATICCS_CONFIG;
+        $secret = s::$OSS_CONFIG;
+        $host = $conf['bucket'] . '.' . preg_replace('/^https?:\\/\\//iu', '', $conf['endpoint']);
+        $uri = '/' . implode('/', array_map('rawurlencode', explode('/', staticcs_key($key))));
+        
+        ksort($query);
+        $canonicalQuery = '';
+        foreach ($query as $k => $v) {
+            $canonicalQuery .= ($canonicalQuery ? '&' : '') . rawurlencode($k) . '=' . rawurlencode($v);
+        }
+        
+        $payloadHash = $filePath ? hash_file('sha256', $filePath) : hash('sha256', '');
+        $date = gmdate('Ymd');
+        $amzDate = gmdate('Ymd\THis\Z');
+        $headers = array_merge([
+            'host' => $host,
+            'x-amz-content-sha256' => $payloadHash,
+            'x-amz-date' => $amzDate
+        ], $headersExtra);
+        ksort($headers);
+        $canonicalHeaders = '';
+        $signedHeaders = '';
+        foreach ($headers as $k => $v) {
+            $canonicalHeaders .= $k . ':' . trim($v) . "\n";
+            $signedHeaders .= ($signedHeaders ? ';' : '') . $k;
+        }
+        
+        $canonicalRequest = implode("\n", [$method, $uri, $canonicalQuery, $canonicalHeaders, $signedHeaders, $payloadHash]);
+        $scope = $date . '/' . $conf['region'] . '/s3/aws4_request';
+        $stringToSign = implode("\n", ['AWS4-HMAC-SHA256', $amzDate, $scope, hash('sha256', $canonicalRequest)]);
+        $kSigning = hash_hmac('sha256', 'aws4_request', hash_hmac('sha256', 's3', hash_hmac('sha256', $conf['region'], hash_hmac('sha256', $date, 'AWS4' . $secret['accessKeySecret'], true), true), true), true);
+        $signature = hash_hmac('sha256', $stringToSign, $kSigning);
+        
+        $headerLines = ['Authorization: AWS4-HMAC-SHA256 Credential=' . $secret['accessKeyId'] . '/' . $scope . ', SignedHeaders=' . $signedHeaders . ', Signature=' . $signature];
+        foreach ($headers as $k => $v) {
+            $headerLines[] = $k . ': ' . trim($v);
+        }
+        
+        $curl = curl_init();
+        curl_setopt($curl, CURLOPT_URL, 'https://' . $host . $uri . ($canonicalQuery ? '?' . $canonicalQuery : ''));
+        curl_setopt($curl, CURLOPT_CUSTOMREQUEST, $method);
+        curl_setopt($curl, CURLOPT_HTTPHEADER, $headerLines);
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+        if ($head) {
+            curl_setopt($curl, CURLOPT_NOBODY, 1);
+            curl_setopt($curl, CURLOPT_HEADER, 1);
+        }
+        $fp = null;
+        if ($filePath) {
+            $fp = fopen($filePath, 'r');
+            curl_setopt($curl, CURLOPT_UPLOAD, 1);
+            curl_setopt($curl, CURLOPT_INFILE, $fp);
+            curl_setopt($curl, CURLOPT_INFILESIZE, filesize($filePath));
+        }
+        $result = curl_exec($curl);
+        $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        curl_close($curl);
+        if ($fp) fclose($fp);
+        return [$status, $result];
+    }
+    
+    function staticcs_dir($name = '') {
+        // 对象存储无目录概念
+        return true;
+    }
+    /* 生成 PUT 预签名URL（SigV4 query 签名，Content-Type 参与签名以固定对象MIME） */
+    function staticcs_presign($key = '', $contentType = '', $expires = 600) {
+        $conf = c::$STATICCS_CONFIG;
+        $secret = s::$OSS_CONFIG;
+        $host = $conf['bucket'] . '.' . preg_replace('/^https?:\\/\\//iu', '', $conf['endpoint']);
+        $uri = '/' . implode('/', array_map('rawurlencode', explode('/', staticcs_key($key))));
+        $date = gmdate('Ymd');
+        $amzDate = gmdate('Ymd\THis\Z');
+        $scope = $date . '/' . $conf['region'] . '/s3/aws4_request';
+        
+        $signedHeaders = ($contentType ? 'content-type;' : '') . 'host';
+        $query = [
+            'X-Amz-Algorithm' => 'AWS4-HMAC-SHA256',
+            'X-Amz-Credential' => $secret['accessKeyId'] . '/' . $scope,
+            'X-Amz-Date' => $amzDate,
+            'X-Amz-Expires' => '' . intval($expires),
+            'X-Amz-SignedHeaders' => $signedHeaders
+        ];
+        ksort($query);
+        $canonicalQuery = '';
+        foreach ($query as $k => $v) {
+            $canonicalQuery .= ($canonicalQuery ? '&' : '') . rawurlencode($k) . '=' . rawurlencode($v);
+        }
+        
+        $canonicalHeaders = ($contentType ? 'content-type:' . trim($contentType) . "\n" : '') . 'host:' . $host . "\n";
+        $canonicalRequest = implode("\n", ['PUT', $uri, $canonicalQuery, $canonicalHeaders, $signedHeaders, 'UNSIGNED-PAYLOAD']);
+        $stringToSign = implode("\n", ['AWS4-HMAC-SHA256', $amzDate, $scope, hash('sha256', $canonicalRequest)]);
+        $kSigning = hash_hmac('sha256', 'aws4_request', hash_hmac('sha256', 's3', hash_hmac('sha256', $conf['region'], hash_hmac('sha256', $date, 'AWS4' . $secret['accessKeySecret'], true), true), true), true);
+        $signature = hash_hmac('sha256', $stringToSign, $kSigning);
+        
+        return 'https://' . $host . $uri . '?' . $canonicalQuery . '&X-Amz-Signature=' . $signature;
+    }
+    /* HEAD 对象，返回大小（字节）；不存在返回 false */
+    function staticcs_stat($key = '') {
+        list($status, $header) = staticcs_request('HEAD', $key, null, [], [], true);
+        if ($status < 200 || $status >= 300) return false;
+        preg_match('#content-length:\s*(\d+)#iu', $header, $m);
+        return intval(isset($m[1]) ? $m[1] : 0);
+    }
+    /* 校验直传对象存在且大小合规，超限则删除 */
+    function staticcs_verify_uploaded($key = '') {
+        $size = staticcs_stat($key);
+        if ($size === false) return false;
+        if ($size > c::$UPLOAD_SIZELIMIT) {
+            staticcs_del($key);
+            return false;
+        }
+        return true;
     }
     function staticcs_upload($from = '', $to = '') {
-        $arr = explode('/', $to);
-        unset($arr[count($arr) - 1]);
-        $dir = implode('/', $arr);
-        staticcs_dir($dir);
-        $rpath = c::$STATICCS_CONFIG['root'] . '/' . $to;
-        if (file_exists($rpath))
-            unlink($rpath);
-        return rename($from, $rpath);
+        $mime = [
+            'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif',
+            'webp' => 'image/webp', 'svg' => 'image/svg+xml', 'ico' => 'image/x-icon', 'mp4' => 'video/mp4',
+            'ttf' => 'font/ttf', 'css' => 'text/css', 'js' => 'text/javascript', 'json' => 'application/json'
+        ];
+        $ext = strtolower(pathinfo($to, PATHINFO_EXTENSION));
+        $contentType = isset($mime[$ext]) ? $mime[$ext] : 'application/octet-stream';
+        list($status) = staticcs_request('PUT', $to, $from, ['content-type' => $contentType]);
+        return $status >= 200 && $status < 300;
     }
     function staticcs_rename($from = '', $to = '') {
-        return rename(c::$STATICCS_CONFIG['root'] . '/' . $from, c::$STATICCS_CONFIG['root'] . '/' . $to);
+        // S3 无 rename：CopyObject 后删除源对象
+        $copySource = c::$STATICCS_CONFIG['bucket'] . '/' . implode('/', array_map('rawurlencode', explode('/', staticcs_key($from))));
+        list($status) = staticcs_request('PUT', $to, null, ['x-amz-copy-source' => $copySource]);
+        if ($status < 200 || $status >= 300) return false;
+        return staticcs_del($from);
     }
     function staticcs_del($url = '') {
-        return unlink(c::$STATICCS_CONFIG['root'] . '/' . $url);
+        list($status) = staticcs_request('DELETE', $url);
+        return $status >= 200 && $status < 300;
     }
     function staticcs_list($url = '') {
         $res = [];
-        $obj = opendir(c::$STATICCS_CONFIG['root'] . '/' . $url);
-        while (($v = readdir($obj)) !== false){
-            if ($v != '.' && $v != '..') {
-                $dir = c::$STATICCS_CONFIG['root'] . '/' . $url . '/' . $v;
-                $res[] = ['name' => $v, 'type' => is_dir($dir), 'size' => filesize($dir), 'time' => filemtime($dir) * 1000];
+        $prefix = staticcs_key($url);
+        if ($prefix && substr($prefix, -1) != '/') $prefix .= '/';
+        $token = '';
+        do {
+            $query = ['list-type' => '2', 'delimiter' => '/', 'prefix' => $prefix];
+            if ($token) $query['continuation-token'] = $token;
+            list($status, $body) = staticcs_request('GET', '', null, [], $query);
+            if ($status < 200 || $status >= 300) return $res;
+            $xml = simplexml_load_string($body);
+            foreach ($xml->CommonPrefixes as $v) {
+                $res[] = ['name' => basename(rtrim((string)$v->Prefix, '/')), 'type' => true, 'size' => 0, 'time' => 0];
             }
-        }
+            foreach ($xml->Contents as $v) {
+                $key = (string)$v->Key;
+                if ($key == $prefix) continue;
+                $res[] = ['name' => basename($key), 'type' => false, 'size' => intval((string)$v->Size), 'time' => strtotime((string)$v->LastModified) * 1000];
+            }
+            $token = isset($xml->NextContinuationToken) ? (string)$xml->NextContinuationToken : '';
+        } while ($token);
         return $res;
     }
 ?>

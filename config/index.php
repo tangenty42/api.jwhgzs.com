@@ -15,15 +15,13 @@
             ]
         ];
         
-        public static $MAIN_SERVER = 'https://www.jwhgzs.com';
-        public static $STATIC_SERVER = 'https://static.jwhgzs.com';
         public static $JSCOOKIE_MAINDOMAIN = '.jwhgzs.com';
         public static $UPLOAD_SIZELIMIT = 1024 * 1024 * 300;
         public static $USER_EDITABLESQLKEYS = [
             'pass', 'selfIntroduce'
         ];
         public static $USER_PUBLICSQLKEYS = [
-            'id', 'name', 'userGroup', 'userAuth', 'avatarVersion', 'selfIntroduce'
+            'id', 'name', 'userGroup', 'userAuth', 'avatarVersion', 'avatarExt', 'selfIntroduce'
         ];
         // $ADMIN_UIDS格式：level => uid
         public static $ADMIN_UIDS = [
@@ -74,7 +72,7 @@
                 0 => 'https://tzy-su.jwhgzs.com'
             ],
             'static' => [
-                0 => 'https://static.jwhgzs.com',
+                0 => 'https://jwhgzs.oss.tangenty.cn',
                 'public' => [
                     0 => '/public',
                     'js' => [
@@ -246,9 +244,15 @@
             ]
         ];
         public static $STATICCS_CONFIG = [
+            /* 本地目录模式（旧）
             // Stupid issue.
             // 'root' => '/www/wwwroot/static.jwhgzs.com'
-            'root' => '/www/sites/static.jwhgzs.com/index'
+            'root' => '/www/sites/static.jwhgzs.com/index' */
+            // S3 兼容对象存储（虚拟主机风格 bucket.endpoint）
+            'endpoint' => 'https://cn-nb1.rains3.com',
+            'region' => 'cn-nb1',
+            'bucket' => 'static-jwhgzs-com',
+            'prefix' => ''
         ];
         
         public static $QUILL_CONFIG = [

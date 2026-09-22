@@ -6,7 +6,9 @@
     $tname = $json['isClass'] ? 'xnzx_class_table' : 'xnzx_student_table';
     
     $dir = u('static_user://PA') . '/' . $json['id'];
-    $result1 = staticcs_del($dir . '/' . $json['name'] . '.jpg');
+    // 无扩展名的为旧数据，补 .jpg
+    $fname = (strpos($json['name'], '.') === false ? $json['name'] . '.jpg' : $json['name']);
+    $result1 = staticcs_del($dir . '/' . $fname);
     
     if (! $json['isClass'])
         $d = sql_query1('SELECT id, PA_photosName FROM ' . $tname . ' WHERE id = ?', [$json['id']]);

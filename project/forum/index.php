@@ -6,6 +6,8 @@
     if (isset($json['classify'])) {
         $list = sql_query('SELECT ' . sql_fieldsExcept('forum', ['postIP']) . ' FROM forum WHERE classify = ? AND type = 1 ORDER BY id DESC', [intval($json['classify'])]);
         foreach ($list as $k => $v) {
+            $list[$k]['content'] = app_staticcs_resolve($v['content']);
+            $list[$k]['coverImg'] = app_staticcs_resolve($v['coverImg']);
             $list[$k]['looks'] = app_getLooks('forum', $v['id']);
             $list[$k]['likes'] = app_getLikes('forum', $v['id']);
             $list[$k]['replys'] = sql_query_count('SELECT id FROM forum WHERE pid = ?', [$v['id']]);
