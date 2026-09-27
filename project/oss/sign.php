@@ -7,8 +7,11 @@
     if (! $uid) {
         api_callback(0, '你还没登录呢~');
     }
+    if ($json['module'] !== 'avatar' && app_getAdminLevel($uid) !== 100) {
+        api_callback(0, '只有最高权限管理员可以上传文件呢~');
+    }
     $size = intval($json['size']);
-    if ($size <= 0 || $size > c::$UPLOAD_SIZELIMIT) {
+    if ($size <= 0 || ($json['module'] != 'tmp20230813' && $size > c::$UPLOAD_SIZELIMIT)) {
         api_callback(0, '文件大小超过限制了呢~');
     }
     $extMap = [
@@ -69,7 +72,7 @@
     }
     
     api_callback(1, '', [
-        'uploadUrl' => staticcs_presign($key, $mime),
+        'uploadUrl' => staticcs_presign($key, $mime, $size),
         'key' => $key,
         'url' => u('static://') . staticcs_key($key)
     ]);

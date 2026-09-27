@@ -880,8 +880,8 @@
         // 对象存储无目录概念
         return true;
     }
-    /* 生成 PUT 预签名URL（SigV4 query 签名，Content-Type 参与签名以固定对象MIME） */
-    function staticcs_presign($key = '', $contentType = '', $expires = 600) {
+    /* 生成 PUT 预签名URL（SigV4 query 签名，Content-Type 和 Content-Length 参与签名） */
+    function staticcs_presign($key = '', $contentType = '', $contentLength = 0, $expires = 600) {
         $conf = c::$STATICCS_CONFIG;
         $secret = s::$OSS_CONFIG;
         $host = $conf['bucket'] . '.' . preg_replace('/^https?:\\/\\//iu', '', $conf['endpoint']);
@@ -890,7 +890,10 @@
         $amzDate = gmdate('Ymd\THis\Z');
         $scope = $date . '/' . $conf['region'] . '/s3/aws4_request';
         
-        $signedHeaders = ($contentType ? 'content-type;' : '') . 'host';
+        $headers = ['content-length' => '' . intval($contentLength), 'host' => $host];
+        if ($contentType) $headers['content-type'] = trim($contentType);
+        ksort($headers);
+        $signedHeaders = implode(';', array_keys($headers));
         $query = [
             'X-Amz-Algorithm' => 'AWS4-HMAC-SHA256',
             'X-Amz-Credential' => $secret['accessKeyId'] . '/' . $scope,
@@ -904,7 +907,10 @@
             $canonicalQuery .= ($canonicalQuery ? '&' : '') . rawurlencode($k) . '=' . rawurlencode($v);
         }
         
-        $canonicalHeaders = ($contentType ? 'content-type:' . trim($contentType) . "\n" : '') . 'host:' . $host . "\n";
+        $canonicalHeaders = '';
+        foreach ($headers as $k => $v) {
+            $canonicalHeaders .= $k . ':' . trim($v) . "\n";
+        }
         $canonicalRequest = implode("\n", ['PUT', $uri, $canonicalQuery, $canonicalHeaders, $signedHeaders, 'UNSIGNED-PAYLOAD']);
         $stringToSign = implode("\n", ['AWS4-HMAC-SHA256', $amzDate, $scope, hash('sha256', $canonicalRequest)]);
         $kSigning = hash_hmac('sha256', 'aws4_request', hash_hmac('sha256', 's3', hash_hmac('sha256', $conf['region'], hash_hmac('sha256', $date, 'AWS4' . $secret['accessKeySecret'], true), true), true), true);
@@ -919,11 +925,11 @@
         preg_match('#content-length:\s*(\d+)#iu', $header, $m);
         return intval(isset($m[1]) ? $m[1] : 0);
     }
-    /* 校验直传对象存在且大小合规，超限则删除 */
-    function staticcs_verify_uploaded($key = '') {
+    /* 校验直传对象存在且大小合规（传 false 可跳过大小限制），超限则删除 */
+    function staticcs_verify_uploaded($key = '', $sizeLimit = null) {
         $size = staticcs_stat($key);
         if ($size === false) return false;
-        if ($size > c::$UPLOAD_SIZELIMIT) {
+        if ($sizeLimit !== false && $size > ($sizeLimit === null ? c::$UPLOAD_SIZELIMIT : $sizeLimit)) {
             staticcs_del($key);
             return false;
         }

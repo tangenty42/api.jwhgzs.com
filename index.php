@@ -1,6 +1,10 @@
 <?php
     require_once __DIR__ . '/config/index.php';
     require_once __DIR__ . '/require/index.php';
+
+    if (intval($_SERVER['CONTENT_LENGTH']) > c::$REQUEST_BODY_SIZELIMIT) {
+        api_callback(0, '请求体大小超过限制了呢~');
+    }
     
     function text_url2host($url = '') {
         return strtolower(explode('/', $url)[2]);

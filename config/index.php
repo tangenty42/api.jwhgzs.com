@@ -16,7 +16,8 @@
         ];
         
         public static $JSCOOKIE_MAINDOMAIN = '.jwhgzs.com';
-        public static $UPLOAD_SIZELIMIT = 1024 * 1024 * 300;
+        public static $UPLOAD_SIZELIMIT = 1024 * 1024 * 10;
+        public static $REQUEST_BODY_SIZELIMIT = 1024 * 1024 * 10;
         public static $USER_EDITABLESQLKEYS = [
             'pass', 'selfIntroduce'
         ];
