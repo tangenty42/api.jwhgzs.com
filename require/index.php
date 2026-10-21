@@ -946,38 +946,38 @@
         list($status) = staticcs_request('PUT', $to, $from, ['content-type' => $contentType]);
         return $status >= 200 && $status < 300;
     }
-    function staticcs_rename($from = '', $to = '') {
-        // S3 无 rename：CopyObject 后删除源对象
-        $copySource = c::$STATICCS_CONFIG['bucket'] . '/' . implode('/', array_map('rawurlencode', explode('/', staticcs_key($from))));
-        list($status) = staticcs_request('PUT', $to, null, ['x-amz-copy-source' => $copySource]);
-        if ($status < 200 || $status >= 300) return false;
-        return staticcs_del($from);
-    }
+    // function staticcs_rename($from = '', $to = '') {
+    //     // S3 无 rename：CopyObject 后删除源对象
+    //     $copySource = c::$STATICCS_CONFIG['bucket'] . '/' . implode('/', array_map('rawurlencode', explode('/', staticcs_key($from))));
+    //     list($status) = staticcs_request('PUT', $to, null, ['x-amz-copy-source' => $copySource]);
+    //     if ($status < 200 || $status >= 300) return false;
+    //     return staticcs_del($from);
+    // }
     function staticcs_del($url = '') {
         list($status) = staticcs_request('DELETE', $url);
         return $status >= 200 && $status < 300;
     }
-    function staticcs_list($url = '') {
-        $res = [];
-        $prefix = staticcs_key($url);
-        if ($prefix && substr($prefix, -1) != '/') $prefix .= '/';
-        $token = '';
-        do {
-            $query = ['list-type' => '2', 'delimiter' => '/', 'prefix' => $prefix];
-            if ($token) $query['continuation-token'] = $token;
-            list($status, $body) = staticcs_request('GET', '', null, [], $query);
-            if ($status < 200 || $status >= 300) return $res;
-            $xml = simplexml_load_string($body);
-            foreach ($xml->CommonPrefixes as $v) {
-                $res[] = ['name' => basename(rtrim((string)$v->Prefix, '/')), 'type' => true, 'size' => 0, 'time' => 0];
-            }
-            foreach ($xml->Contents as $v) {
-                $key = (string)$v->Key;
-                if ($key == $prefix) continue;
-                $res[] = ['name' => basename($key), 'type' => false, 'size' => intval((string)$v->Size), 'time' => strtotime((string)$v->LastModified) * 1000];
-            }
-            $token = isset($xml->NextContinuationToken) ? (string)$xml->NextContinuationToken : '';
-        } while ($token);
-        return $res;
-    }
+    // function staticcs_list($url = '') {
+    //     $res = [];
+    //     $prefix = staticcs_key($url);
+    //     if ($prefix && substr($prefix, -1) != '/') $prefix .= '/';
+    //     $token = '';
+    //     do {
+    //         $query = ['list-type' => '2', 'delimiter' => '/', 'prefix' => $prefix];
+    //         if ($token) $query['continuation-token'] = $token;
+    //         list($status, $body) = staticcs_request('GET', '', null, [], $query);
+    //         if ($status < 200 || $status >= 300) return $res;
+    //         $xml = simplexml_load_string($body);
+    //         foreach ($xml->CommonPrefixes as $v) {
+    //             $res[] = ['name' => basename(rtrim((string)$v->Prefix, '/')), 'type' => true, 'size' => 0, 'time' => 0];
+    //         }
+    //         foreach ($xml->Contents as $v) {
+    //             $key = (string)$v->Key;
+    //             if ($key == $prefix) continue;
+    //             $res[] = ['name' => basename($key), 'type' => false, 'size' => intval((string)$v->Size), 'time' => strtotime((string)$v->LastModified) * 1000];
+    //         }
+    //         $token = isset($xml->NextContinuationToken) ? (string)$xml->NextContinuationToken : '';
+    //     } while ($token);
+    //     return $res;
+    // }
 ?>

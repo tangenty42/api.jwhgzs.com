@@ -249,10 +249,15 @@
             // Stupid issue.
             // 'root' => '/www/wwwroot/static.jwhgzs.com'
             'root' => '/www/sites/static.jwhgzs.com/index' */
-            // S3 兼容对象存储（虚拟主机风格 bucket.endpoint）
+            /* RainS3（旧，回滚时取消注释并清空下方三项）
             'endpoint' => 'https://cn-nb1.rains3.com',
             'region' => 'cn-nb1',
-            'bucket' => 'static-jwhgzs-com',
+            'bucket' => 'static-jwhgzs-com', */
+            // 阿里云 OSS S3 兼容（虚拟主机风格 bucket.endpoint）
+            // endpoint 必须带 s3. 前缀且末尾不带斜杠；region 用于 SigV4 scope，不带 oss- 前缀
+            'endpoint' => 'https://s3.oss-cn-shenzhen.aliyuncs.com',
+            'region' => 'cn-shenzhen', // 如 cn-hangzhou
+            'bucket' => 'jwhgzs-static', // 新 bucket 名（无下划线）
             'prefix' => ''
         ];
         
