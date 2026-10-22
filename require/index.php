@@ -11,8 +11,8 @@
         header('Access-Control-Allow-Origin: ' . $__origin);
     }
     */
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Headers: *');
+    // header('Access-Control-Allow-Origin: *');
+    // header('Access-Control-Allow-Headers: *');
     // 正则表达式长度限制解除，参考：https://blog.csdn.net/leafgw/article/details/50381298
     ini_set('pcre.backtrack_limit', -1);
     
@@ -880,8 +880,12 @@
         // 对象存储无目录概念
         return true;
     }
-    /* 生成 PUT 预签名URL（SigV4 query 签名，Content-Type 和 Content-Length 参与签名） */
-    function staticcs_presign($key = '', $contentType = '', $contentLength = 0, $expires = 600) {
+    /* 生成 PUT 预签名URL（SigV4 query 签名，Content-Type 和 Content-Length 参与签名）；$sizeLimit 传 false 可跳过大小限制 */
+    function staticcs_presign($key = '', $contentType = '', $contentLength = 0, $expires = 600, $sizeLimit = null) {
+        // 大小限制闸口：Content-Length 参与签名，此处拦截后直传即无法超限
+        if ($sizeLimit !== false && intval($contentLength) > ($sizeLimit === null ? c::$UPLOAD_SIZELIMIT : $sizeLimit)) {
+            api_callback(0, '文件大小超过限制了呢~');
+        }
         $conf = c::$STATICCS_CONFIG;
         $secret = s::$OSS_CONFIG;
         $host = $conf['bucket'] . '.' . preg_replace('/^https?:\\/\\//iu', '', $conf['endpoint']);

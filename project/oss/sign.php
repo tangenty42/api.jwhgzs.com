@@ -11,7 +11,7 @@
         api_callback(0, '只有最高权限管理员可以上传文件呢~');
     }
     $size = intval($json['size']);
-    if ($size <= 0 || ($json['module'] != 'tmp20230813' && $size > c::$UPLOAD_SIZELIMIT)) {
+    if ($size <= 0) {
         api_callback(0, '文件大小超过限制了呢~');
     }
     $extMap = [
@@ -28,6 +28,17 @@
         }
     }
     $ext = isset($extMap[$mime]) ? $extMap[$mime] : '';
+    // 图片类模块扩展名白名单（与各自上传完成校验的正则保持一致；防 svg 脚本注入等）
+    $moduleExtAllow = [
+        'avatar' => ['jpg', 'png', 'gif', 'webp'],
+        'forum' => ['jpg', 'png', 'gif', 'webp'],
+        'PA' => ['jpg', 'png', 'gif', 'webp'],
+        'weekly' => ['jpg', 'png', 'gif', 'webp']
+    ];
+    $extAllow = isset($moduleExtAllow['' . $json['module']]) ? $moduleExtAllow['' . $json['module']] : null;
+    if ($extAllow && ! in_array($ext, $extAllow)) {
+        api_callback(0, '不支持的文件类型呢~');
+    }
     
     switch ('' . $json['module']) {
         case 'avatar':
@@ -72,7 +83,8 @@
     }
     
     api_callback(1, '', [
-        'uploadUrl' => staticcs_presign($key, $mime, $size),
+        // tmp20230813 模块不限制大小（其余模块走 staticcs_presign 默认闸口 UPLOAD_SIZELIMIT）
+        'uploadUrl' => staticcs_presign($key, $mime, $size, 600, $json['module'] == 'tmp20230813' ? false : null),
         'key' => $key,
         'url' => u('static://') . staticcs_key($key)
     ]);
