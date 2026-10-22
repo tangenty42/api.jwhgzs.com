@@ -122,9 +122,14 @@
         $paths[] = $base . $res . '/index.php';
         
         $ok = false;
+        $baseReal = realpath($base);
         foreach ($paths as $k => $v) {
             if (file_exists($v) && (! is_dir($v))) {
-                $ok = $v;
+                // 防路径穿越：真实路径必须仍位于 project/ 内
+                $real = realpath($v);
+                if ($baseReal !== false && $real !== false && strpos($real, $baseReal . '/') === 0) {
+                    $ok = $v;
+                }
             }
         }
         if (! $ok) {
@@ -150,6 +155,10 @@
         }
     }
     
+    // 防路径穿越：拒绝 .. 路径段（realpath 校验之外的纵深防御）
+    if (! is_string(isset($_GET['__url']) ? $_GET['__url'] : null) || preg_match('#(^|/)\.\.(/|$)#u', $_GET['__url'])) {
+        $_GET['__url'] = '/__404__';
+    }
     $__url = text_format_dir($_GET['__url']);
     $__host = $_SERVER['HTTP_HOST'];
     $__urlData = __parseUrl($__url, $__host);

@@ -3,12 +3,12 @@
     
     list($uid, $json) = app_check('x');
     
-    $replyList = sql_query('SELECT ' . sql_fieldsExcept('forum', ['postIP']) . ' FROM forum WHERE id = ? OR pid = ?', [intval($json['id']), intval($json['id'])]);
+    $replyList = sql_query('SELECT ' . sql_fieldsExcept('forum', ['postIP', 'postUA']) . ' FROM forum WHERE id = ? OR pid = ?', [intval($json['id']), intval($json['id'])]);
     $data = [];
     foreach ($replyList as $k => $v) {
         $data[$k] = $v;
         $data[$k]['_id'] = $k;
-        $data[$k]['content'] = app_staticcs_resolve($v['content']);
+        $data[$k]['content'] = app_staticcs_resolve(app_html_purify($v['content']));
         $data[$k]['coverImg'] = app_staticcs_resolve($v['coverImg']);
         $data[$k]['looks'] = app_getLooks('forum', $v['id']);
         $data[$k]['likes'] = app_getLikes('forum', $v['id']);

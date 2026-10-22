@@ -1,6 +1,9 @@
 <?php
 
-    error_reporting(0);
+    // 错误不回显但记录日志（M-07）：可追踪问题且不向客户端泄露敏感信息
+    error_reporting(E_ALL);
+    ini_set('display_errors', '0');
+    ini_set('log_errors', '1');
     
     /* 公共处理 */
     // 跨域检测，参考：https://www.gxlcms.com/PHPjiqiao-375366.html
@@ -13,8 +16,8 @@
     */
     // header('Access-Control-Allow-Origin: *');
     // header('Access-Control-Allow-Headers: *');
-    // 正则表达式长度限制解除，参考：https://blog.csdn.net/leafgw/article/details/50381298
-    ini_set('pcre.backtrack_limit', -1);
+    // 使用 PHP 默认回溯上限（M-07），避免用户输入驱动正则导致 ReDoS
+    ini_set('pcre.backtrack_limit', '1000000');
     
     /* 函数集 */
     function i($dir = '') {
@@ -63,31 +66,11 @@
     function text_random($dig = 16, $md5mode = false) {
         $str = $md5mode ? 'abcdef0123456789' : 'abcdefghijklmnopqrstuvwxyz0123456789';
         $res = '';
+        // CSPRNG：token 等安全场景不可使用 rand()/mt_rand()
         for ($i = 0; $i < $dig; $i ++) {
-            $res .= $str[rand(0, strlen($str) - 1)];
+            $res .= $str[random_int(0, strlen($str) - 1)];
         }
         return $res;
-    }
-    function text_parseData2SQL_add($data) {
-        $keys = ['id'];
-        $values = [null];
-        $values2 = ['?'];
-        foreach ($data as $k => $v) {
-            $keys[] = $k;
-            $values[] = $v;
-            $values2[] = '?';
-        }
-        return ['(' . implode(', ', $keys) . ') VALUES (' . implode(', ', $values2) . ')', $values];
-    }
-    function text_parseData2SQL_edit($json = []) {
-        $res = [];
-        $values = [];
-        foreach ($json['data'] as $k => $v) {
-            $res[] = $k . ' = ?';
-            $values[] = $v;
-        }
-        $values[] = $json['id'];
-        return [implode(', ', $res) . ' WHERE id = ? LIMIT 1', $values];
     }
     function time_microtime() {
         // 这个命名错了哈（应为 毫秒），但是已经用在老多地方了，就懒得改了，有这意思就行
@@ -229,8 +212,7 @@
         /* 来源：https://www.cnblogs.com/dadiaomengmei/p/11447689.html */
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, FALSE);
-        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, FALSE);
+        // 保持 TLS 证书校验（禁止关闭 VERIFYPEER/VERIFYHOST，防中间人篡改响应）
         if (! empty($data)) {
             curl_setopt($curl, CURLOPT_POST, 1);
             curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
@@ -259,9 +241,6 @@
         ];
         return http($url, json_encode($dataArray), array_merge($jsonHeader, $header), $cookie);
     }
-    function http_prosi($url = '', $data = [], $header = [], $cookie = []) {
-        echo(http($url, $data, $header, $cookie, false));
-    }
     function http_locate() {
         return 'http' . ($_SERVER['HTTPS'] == 'on' ? 's' : '') . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
     }
@@ -279,26 +258,48 @@
         header('Content-type: application/json;');
         exit(json_encode(['status' => $status, 'msg' => $msg, 'data' => $data]));
     }
-    function api_admin($table_prefix = '', $admin_level = 1) {
-        list($uid, $json) = app_check('as', ['action', 'table'], $admin_level);
-        $json['table'] = $table_prefix . $json['table'];
-        if ($json['action'] == 'add') {
-            app_check('a', ['data']);
-            list($sql, $params) = text_parseData2SQL_add($json['data']);
-            sql_exec('INSERT INTO ' . $json['table'] . ' ' . $sql, $params);
-        }
-        elseif ($json['action'] == 'delete') {
-            app_check('a', ['id']);
-            sql_exec('DELETE FROM ' . $json['table'] . ' WHERE id = ?', [$json['id']]);
-        }
-        elseif ($json['action'] == 'edit') {
-            app_check('a', ['id', 'data']);
-            list($sql, $params) = text_parseData2SQL_edit($json);
-            sql_exec('UPDATE ' . $json['table'] . ' SET ' . $sql, $params);
-        }
-        api_callback(1, '');
+
+    /* 密码哈希辅助（S-02）：新密码一律 password_hash 入库；
+       迁移前的明文仅在登录/改密时做兼容校验，登录成功后立即升级为哈希 */
+    function app_isPasswordHash($stored = '') {
+        return password_get_info('' . $stored)['algoName'] !== 'unknown';
     }
-    
+    function app_verifyUserPassword($input = '', $stored = '') {
+        if (! is_string($input)) return false;
+        $stored = '' . $stored;
+        if (app_isPasswordHash($stored)) {
+            return password_verify($input, $stored);
+        }
+        // 兼容未迁移的明文：精确、定时安全比较
+        return ($stored !== '' && hash_equals($stored, $input));
+    }
+    function app_passwordNeedsUpgrade($stored = '') {
+        $stored = '' . $stored;
+        return (! app_isPasswordHash($stored)) || password_needs_rehash($stored, PASSWORD_DEFAULT);
+    }
+    /* 敏感操作速率限制（独立 rateLimit 表）。
+       $uid：登录态主体（如改密）；$subject：未登录主体标识（用户名/手机号）；
+       $countAll = true 时统计所有尝试（用于发短信等"发送即占额度"场景），否则只计失败 */
+    function app_rateLimit_guard($action = '', $uid = 0, $limit = 5, $windowMs = 600000, $subject = '', $countAll = false, $ipLimit = null) {
+        // IP 维度独立于主体：换用户名/手机号/账号也无法绕过；$ipLimit 传 0 可关闭
+        $ipLimit = ($ipLimit === null ? $limit * 3 : intval($ipLimit));
+        $since = time_microtime() - $windowMs;
+        $row = sql_query1(
+            'SELECT SUM(CASE WHEN uid = ? THEN 1 ELSE 0 END) AS byUid, SUM(CASE WHEN userIP = ? THEN 1 ELSE 0 END) AS byIp, SUM(CASE WHEN subject = ? THEN 1 ELSE 0 END) AS bySubject FROM rateLimit WHERE action = ?' . ($countAll ? '' : ' AND success = 0') . ' AND actionTime >= ?',
+            [intval($uid), app_getUserIP(), $subject, $action, $since]
+        );
+        if (($uid && intval($row['byUid']) >= $limit) || ($ipLimit && intval($row['byIp']) >= $ipLimit) || ($subject !== '' && intval($row['bySubject']) >= $limit)) {
+            api_callback(0, '失败尝试太多啦，请 ' . intval(ceil($windowMs / 60000)) . ' 分钟后再试哦~');
+        }
+    }
+    function app_rateLimit_hit($action = '', $uid = 0, $success = false, $subject = '') {
+        sql_exec('INSERT INTO rateLimit (id, action, uid, success, subject, userIP, userUA, actionTime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [sql_newId('rateLimit'), $action, intval($uid), $success ? 1 : 0, $subject, app_getUserIP(), app_getUserUA(), time_microtime()]);
+        // 低概率清理 7 天前记录，避免表膨胀
+        if (random_int(1, 100) === 1) {
+            sql_exec('DELETE FROM rateLimit WHERE actionTime < ?', [time_microtime() - 7 * 24 * 3600 * 1000]);
+        }
+    }
+
     function app_getUserIP() {
         return $_SERVER['REMOTE_ADDR'];
     }
@@ -316,9 +317,9 @@
         if (! $token) return false;
         if ($verifyIsMe) {
             // loginTime + exp >= time, 故loginTime >= time - exp
-            $result = sql_query1('SELECT userId FROM userToken WHERE BINARY token LIKE ? AND loginTime >= ? AND loginIP LIKE ? AND loginUA LIKE ?', [$token, time_microtime() - c::$USERTOKEN_EXPTIME, app_getUserIP(), app_getUserUA()]);
+            $result = sql_query1('SELECT userId FROM userToken WHERE BINARY token = ? AND loginTime >= ? AND loginIP = ? AND loginUA = ?', [$token, time_microtime() - c::$USERTOKEN_EXPTIME, app_getUserIP(), app_getUserUA()]);
         } else {
-            $result = sql_query1('SELECT userId FROM userToken WHERE BINARY token LIKE ? AND loginTime >= ?', [$token, time_microtime() - c::$USERTOKEN_EXPTIME]);
+            $result = sql_query1('SELECT userId FROM userToken WHERE BINARY token = ? AND loginTime >= ?', [$token, time_microtime() - c::$USERTOKEN_EXPTIME]);
         }
         if ($verifyIsActive && (! app_isTokenActive($token))) {
             return false;
@@ -336,7 +337,7 @@
         return false;
     }
     function app_isTokenActive($token = '') {
-        $data = sql_query1('SELECT onlineTime, onlineIP, onlineUA FROM userToken WHERE BINARY token LIKE ?', [$token]);
+        $data = sql_query1('SELECT onlineTime, onlineIP, onlineUA FROM userToken WHERE BINARY token = ?', [$token]);
         if (! $data) {
             return false;
         }
@@ -363,7 +364,7 @@
         
         $real_uid = ($uid_to_query ? intval($uid_to_query) : $uid);
         if (! $uid_to_query) {
-            $count = sql_exec_count('UPDATE userToken SET onlineTime = ?, onlineIP = ?, onlineUA = ?, rand = ? WHERE BINARY token LIKE ?', [time_microtime(), app_getUserIP(), app_getUserUA(), '' . rand(), $json['userToken']]);
+            $count = sql_exec_count('UPDATE userToken SET onlineTime = ?, onlineIP = ?, onlineUA = ?, rand = ? WHERE BINARY token = ?', [time_microtime(), app_getUserIP(), app_getUserUA(), '' . random_int(0, getrandmax()), $json['userToken']]);
             if ($count !== 1) {
                 return null;
             }
@@ -435,7 +436,7 @@
     }
     function app_verifyPhone($phone = '', $verifyCode = '') {
         $smsConfig = c::$SMS_VERIFY_CONFIG;
-        $data = sql_query1('SELECT id FROM phoneVerify WHERE phone = ? AND sendTime >= ? AND used IS NULL AND userIP LIKE ? AND userUA LIKE ? ORDER BY sendTime DESC LIMIT 1', [intval($phone), time_microtime() - $smsConfig['verifyCodeExpTime'], app_getUserIP(), app_getUserUA()]);
+        $data = sql_query1('SELECT id FROM phoneVerify WHERE phone = ? AND sendTime >= ? AND used IS NULL AND userIP = ? AND userUA = ? ORDER BY sendTime DESC LIMIT 1', [intval($phone), time_microtime() - $smsConfig['verifyCodeExpTime'], app_getUserIP(), app_getUserUA()]);
         if (! $data) {
             return ['status' => false, 'code' => 'LOCAL_NOT_FOUND'];
         }
@@ -451,7 +452,7 @@
         $b = sql_exec_count('UPDATE phoneVerify SET used = \'expire\' WHERE id = ? AND used IS NULL', [$id]);
         return ($a && $b);
     }
-    function app_check($config_text = 'd', $fields = [], $minAdminLevel = 1, $isGET = false) {
+    function app_check($config_text = 'd', $fields = [], $minAdminLevel = 1, $isGET = false, $rateAction = '', $rateSubject = '') {
         $config = str_split($config_text);
         $json = api_input($isGET);
         $pvr = 0;
@@ -487,11 +488,17 @@
         }
         if (in_array('p', $config)) {
             $smsConfig = c::$SMS_VERIFY_CONFIG;
+            $rateKey = ($rateSubject !== '' ? $rateSubject : $json['phone']);
+            if ($rateAction) {
+                app_rateLimit_guard($rateAction, 0, 5, 600000, $rateKey, false, 10);
+            }
             if (strlen($json['phoneVerify']) != intval($smsConfig['codeLength'])) {
+                if ($rateAction) app_rateLimit_hit($rateAction, 0, false, $rateKey);
                 api_callback(0, '手机验证码是' . intval($smsConfig['codeLength']) . '位的，蠢！');
             }
             $phoneVerify = app_verifyPhone($json['phone'], $json['phoneVerify']);
             if (! $phoneVerify['status']) {
+                if ($rateAction) app_rateLimit_hit($rateAction, 0, false, $rateKey);
                 api_callback(0, app_sms_error_message($phoneVerify, 'check'));
             }
             $pvr = intval($phoneVerify['id']);
@@ -506,6 +513,28 @@
         return [$uid, $json, $file, $pvr];
     }
     
+    /* 富文本净化（M-03）：quill HTML 白名单过滤，防存储型 XSS。
+       入库（app_quill_format）与输出（forum detail/index）双端净化，覆盖历史数据 */
+    function app_html_purify($html = '') {
+        static $purifier = null;
+        if ($purifier === null) {
+            require_once __DIR__ . '/../../vendor/ezyang/htmlpurifier/library/HTMLPurifier.auto.php';
+            $config = HTMLPurifier_Config::createDefault();
+            $config->set('Core.Encoding', 'UTF-8');
+            $config->set('HTML.AllowedElements', 'p,br,strong,b,em,i,u,s,strike,span,a,img,h1,h2,h3,h4,h5,h6,blockquote,pre,code,ol,ul,li,hr,sub,sup');
+            $config->set('HTML.AllowedAttributes', 'a.href,a.title,img.src,img.alt,img.title,img.width,img.height,*.class');
+            $config->set('URI.AllowedSchemes', ['http' => true, 'https' => true, 'mailto' => true]);
+            $cacheDir = sys_get_temp_dir() . '/htmlpurifier';
+            if (! is_dir($cacheDir)) @mkdir($cacheDir, 0755, true);
+            $config->set('Cache.SerializerPath', $cacheDir);
+            $purifier = new HTMLPurifier($config);
+        }
+        // Purifier 不识别 static:// 自定义协议：先映射为合法 https 占位，净化后还原
+        $html = str_ireplace('static://', 'https://static.invalid/', '' . $html);
+        $out = $purifier->purify($html);
+        return str_ireplace('https://static.invalid/', 'static://', $out);
+    }
+
     function app_quill_format($oriContent = '') {
         $content = $oriContent;
         
@@ -542,6 +571,8 @@
         $pattern = '#https?://' . preg_quote(explode('/', u('static://'))[2], '#') . '/+#iu';
         $content = preg_replace($pattern, 'static://', $content);
         $firstImg = preg_replace($pattern, 'static://', $firstImg);
+        // 入库前白名单净化（防存储型 XSS）
+        $content = app_html_purify($content);
         return [$content, $firstImg];
     }
     
@@ -665,10 +696,11 @@
         try {
             $result = http($url, http_build_query($query), ['Content-Type: application/x-www-form-urlencoded']);
             if (! $result) {
-                return true;
+                // 人机验证 fail-close：服务异常时拒绝放行
+                return false;
             }
         } catch (Exception $e) {
-            return true;
+            return false;
         }
         return isset($result['result']) && $result['result'] === 'success';
     }

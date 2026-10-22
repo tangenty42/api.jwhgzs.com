@@ -1,7 +1,7 @@
 <?php
     /* 用户注册API */
     
-    list($uid, $json, $file, $pvr) = app_check('xvpa', ['name', 'pass', 'phone', 'phoneVerify']);
+    list($uid, $json, $file, $pvr) = app_check('xvpa', ['name', 'pass', 'phone', 'phoneVerify'], 1, false, 'signup');
     
     $name_min = c::$USERINF_LENGTH['name_min'];
     $name_max = c::$USERINF_LENGTH['name_max'];
@@ -18,18 +18,21 @@
     }
     $samePhoneCount = sql_query_count('SELECT id FROM user WHERE phone = ?', [intval($json['phone'])]);
     if ($samePhoneCount !== 0) {
+        app_rateLimit_hit('signup', 0, false, $json['phone']);
         api_callback(0, '你的手机号已经注册了九尾狐账号了~');
     }
-    $sameNameCount = sql_query_count('SELECT id FROM user WHERE name LIKE ?', [intval($json['name'])]);
+    $sameNameCount = sql_query_count('SELECT id FROM user WHERE name = ?', [$json['name']]);
     if ($sameNameCount !== 0) {
+        app_rateLimit_hit('signup', 0, false, $json['phone']);
         api_callback(0, '你的用户名已经有人用了哦~');
     }
     
-    $result = sql_exec_count('INSERT INTO user (id, name, pass, phone, signupTime, signupIP, signupUA) VALUES (?, ?, ?, ?, ?, ?, ?)', [sql_newId('user'), $json['name'], $json['pass'], $json['phone'], time_microtime(), app_getUserIP(), app_getUserUA()]);
+    $result = sql_exec_count('INSERT INTO user (id, name, pass, phone, signupTime, signupIP, signupUA) VALUES (?, ?, ?, ?, ?, ?, ?)', [sql_newId('user'), $json['name'], password_hash($json['pass'], PASSWORD_DEFAULT), $json['phone'], time_microtime(), app_getUserIP(), app_getUserUA()]);
     if (! $result) {
         api_callback(0, '数据操作失败~');
     }
     app_setPhoneVerifyUsed($pvr, 'signup');
+    app_rateLimit_hit('signup', 0, true, $json['phone']);
     
     api_callback(1, '');
 ?>

@@ -88,7 +88,7 @@
             $res = '<strong>♥♥♥可注册♥♥♥</strong>';
             $strong = true;
         }
-        die(($strong ? '<!--*-->' : '') . '<li><strong>' . $name . $ext . '</strong>：' . $res . '</li>');
+        die(($strong ? '<!--*-->' : '') . '<li><strong>' . htmlspecialchars($name . $ext) . '</strong>：' . $res . '</li>');
     }
 ?>
 
